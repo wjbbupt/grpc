@@ -18,26 +18,25 @@
 
 #include "src/core/ext/transport/chttp2/transport/hpack_parser_table.h"
 
+#include <grpc/grpc.h>
+
 #include <string>
 #include <utility>
 
-#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "gtest/gtest.h"
-
-#include <grpc/grpc.h>
-
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/slice/slice.h"
-#include "test/core/util/test_config.h"
+#include "src/core/telemetry/stats.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_core {
 namespace {
-void AssertIndex(const HPackTable* tbl, uint32_t idx, const char* key,
+void AssertIndex(HPackTable* tbl, uint32_t idx, const char* key,
                  const char* value) {
   const auto* md = tbl->Lookup(idx);
   ASSERT_NE(md, nullptr);
-  EXPECT_EQ(md->DebugString(), absl::StrCat(key, ": ", value));
+  EXPECT_EQ(md->md.DebugString(), absl::StrCat(key, ": ", value));
 }
 }  // namespace
 
@@ -114,15 +113,20 @@ TEST(HpackParserTableTest, ManyAdditions) {
 
   ExecCtx exec_ctx;
 
+  auto stats_before = http2_global_stats().Collect();
+
   for (i = 0; i < 100000; i++) {
     std::string key = absl::StrCat("K.", i);
     std::string value = absl::StrCat("VALUE.", i);
     auto key_slice = Slice::FromCopiedString(key);
     auto value_slice = Slice::FromCopiedString(value);
-    auto memento =
-        HPackTable::Memento(std::move(key_slice), std::move(value_slice));
-    auto add_err = tbl.Add(std::move(memento));
-    ASSERT_EQ(add_err, absl::OkStatus());
+    auto memento = HPackTable::Memento{
+        ParsedMetadata<grpc_metadata_batch>(
+            ParsedMetadata<grpc_metadata_batch>::FromSlicePair{},
+            std::move(key_slice), std::move(value_slice),
+            key.length() + value.length() + 32),
+        nullptr};
+    ASSERT_TRUE(tbl.Add(std::move(memento)));
     AssertIndex(&tbl, 1 + hpack_constants::kLastStaticEntry, key.c_str(),
                 value.c_str());
     if (i) {
@@ -132,6 +136,56 @@ TEST(HpackParserTableTest, ManyAdditions) {
                   value.c_str());
     }
   }
+
+  auto stats_after = http2_global_stats().Collect();
+
+  EXPECT_EQ(stats_after->http2_hpack_hits - stats_before->http2_hpack_hits,
+            100000);
+  EXPECT_EQ(stats_after->http2_hpack_misses, stats_before->http2_hpack_misses);
+}
+
+TEST(HpackParserTableTest, ManyUnusedAdditions) {
+  auto tbl = std::make_unique<HPackTable>();
+  int i;
+
+  ExecCtx exec_ctx;
+
+  auto stats_before = http2_global_stats().Collect();
+  const Timestamp start = Timestamp::Now();
+
+  for (i = 0; i < 100000; i++) {
+    std::string key = absl::StrCat("K.", i);
+    std::string value = absl::StrCat("VALUE.", i);
+    auto key_slice = Slice::FromCopiedString(key);
+    auto value_slice = Slice::FromCopiedString(value);
+    auto memento = HPackTable::Memento{
+        ParsedMetadata<grpc_metadata_batch>(
+            ParsedMetadata<grpc_metadata_batch>::FromSlicePair{},
+            std::move(key_slice), std::move(value_slice),
+            key.length() + value.length() + 32),
+        nullptr};
+    ASSERT_TRUE(tbl->Add(std::move(memento)));
+  }
+
+  tbl.reset();
+
+  auto stats_after = http2_global_stats().Collect();
+  const Timestamp end = Timestamp::Now();
+
+  EXPECT_EQ(stats_after->http2_hpack_hits, stats_before->http2_hpack_hits);
+  EXPECT_EQ(stats_after->http2_hpack_misses - stats_before->http2_hpack_misses,
+            100000);
+
+  size_t num_buckets_changed = 0;
+  const auto& lifetime_before = stats_before->http2_hpack_entry_lifetime;
+  const auto& lifetime_after = stats_after->http2_hpack_entry_lifetime;
+  for (size_t i = 0; i < lifetime_before.bucket_count(); i++) {
+    if (lifetime_before.buckets()[i] != lifetime_after.buckets()[i]) {
+      EXPECT_LE(i, lifetime_before.BucketFor((end - start).millis()));
+      num_buckets_changed++;
+    }
+  }
+  EXPECT_GT(num_buckets_changed, 0);
 }
 
 }  // namespace grpc_core

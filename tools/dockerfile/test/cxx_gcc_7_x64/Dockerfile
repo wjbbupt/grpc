@@ -15,6 +15,14 @@
 FROM gcc:7
 
 RUN apt-get update && apt-get install -y curl git time wget zip && apt-get clean
+#=================
+# Setup git to access working directory across docker boundary.
+# This avoids the "fatal: detected dubious ownership in repository XYZ"
+# git error.
+
+RUN git config --global --add safe.directory '*'
+RUN git config --global protocol.file.allow always
+
 #====================
 # run_tests.py python dependencies
 
@@ -40,14 +48,17 @@ RUN python3 -m pip install six==1.16.0
 RUN python3 -m pip install --upgrade google-auth==1.23.0 google-api-python-client==1.12.8 oauth2client==4.1.0
 
 
-#=================
-# Install cmake
-# Note that this step should be only used for distributions that have new enough cmake to satisfy gRPC's cmake version requirement.
-
-RUN apt-get update && apt-get install -y cmake && apt-get clean
+# Some cxx tests depend on the twisted package
+RUN python3 -m pip install twisted
 
 #=================
-# Install ccache
+# Install cmake using the install script.
+RUN curl -sSL -o cmake-linux.sh https://github.com/Kitware/CMake/releases/download/v3.16.1/cmake-3.16.1-Linux-x86_64.sh \
+    && sh cmake-linux.sh -- --skip-license --prefix=/usr \
+    && rm cmake-linux.sh
+
+#=================
+# Install ccache (use slighly older release of ccache that works older compilers and cmake)
 
 # Install ccache from source since ccache 3.x packaged with most linux distributions
 # does not support Redis backend for caching.

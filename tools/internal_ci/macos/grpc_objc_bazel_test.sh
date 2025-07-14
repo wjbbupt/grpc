@@ -56,10 +56,10 @@ TEST_TARGETS=(
   //src/objective-c/tests:InteropTestsRemote
   //src/objective-c/tests:MacTests
   //src/objective-c/tests:UnitTests
-  //src/objective-c/tests:CppCronetTests
-  //src/objective-c/tests:CronetTests
-  //src/objective-c/tests:PerfTests
+  #//src/objective-c/tests:PerfTests
   //src/objective-c/tests:CFStreamTests
+  # Needs oracle engine, which doesn't work with GRPC_IOS_EVENT_ENGINE_CLIENT=1
+  //src/objective-c/tests:EventEngineClientTests
   //src/objective-c/tests:tvtests_build_test
   # codegen plugin tests
   //src/objective-c/tests:objc_codegen_plugin_test
@@ -73,6 +73,7 @@ TEST_TARGETS=(
 # TODO(jtattermusch): can we make ObjC test not depend on running a local interop_server?
 python3 tools/run_tests/python_utils/bazel_report_helper.py --report_path build_interop_server
 build_interop_server/bazel_wrapper \
+  --output_base=.bazel_rbe \
   --bazelrc=tools/remote_build/mac.bazelrc \
   build \
   --google_credentials="${KOKORO_GFILE_DIR}/GrpcTesting-d0eeee2db331.json" \
@@ -113,7 +114,37 @@ objc_bazel_tests/bazel_wrapper \
   --google_credentials="${KOKORO_GFILE_DIR}/GrpcTesting-d0eeee2db331.json" \
   "${BAZEL_REMOTE_CACHE_ARGS[@]}" \
   $BAZEL_FLAGS \
+  --cxxopt=-DGRPC_IOS_EVENT_ENGINE_CLIENT=0 \
+  --test_env=GRPC_VERBOSITY=debug --test_env=GRPC_TRACE=event_engine*,api \
   "${OBJC_TEST_ENV_ARGS[@]}" \
   -- \
   "${EXAMPLE_TARGETS[@]}" \
   "${TEST_TARGETS[@]}"
+
+
+# Enable event engine and run tests again.
+EVENT_ENGINE_TEST_TARGETS=(
+  //src/objective-c/tests:InteropTestsLocalCleartext
+  //src/objective-c/tests:InteropTestsLocalSSL
+  //src/objective-c/tests:InteropTestsRemote
+  //src/objective-c/tests:MacTests
+  //src/objective-c/tests:UnitTests
+  //src/objective-c/tests:EventEngineUnitTests
+  //src/objective-c/tests:CFStreamTests
+  //src/objective-c/tests:tvtests_build_test
+)
+
+python3 tools/run_tests/python_utils/bazel_report_helper.py --report_path objc_event_engine_bazel_tests
+
+objc_event_engine_bazel_tests/bazel_wrapper \
+  --bazelrc=tools/remote_build/include/test_locally_with_resultstore_results.bazelrc \
+  test \
+  --google_credentials="${KOKORO_GFILE_DIR}/GrpcTesting-d0eeee2db331.json" \
+  "${BAZEL_REMOTE_CACHE_ARGS[@]}" \
+  $BAZEL_FLAGS \
+  --test_env=GRPC_EXPERIMENTS=event_engine_client \
+  --test_env=GRPC_VERBOSITY=debug --test_env=GRPC_TRACE=event_engine*,api \
+  "${OBJC_TEST_ENV_ARGS[@]}" \
+  -- \
+  "${EXAMPLE_TARGETS[@]}" \
+  "${EVENT_ENGINE_TEST_TARGETS[@]}"

@@ -16,21 +16,24 @@
 //
 //
 
+#include <grpc/grpc.h>
+#include <grpc/support/alloc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/ext/gcp_observability.h>
+#include <grpcpp/ext/otel_plugin.h>
+
 #include <memory>
 #include <unordered_map>
 
 #include "absl/flags/flag.h"
-
-#include <grpc/grpc.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/ext/gcp_observability.h>
-
-#include "src/core/lib/gpr/string.h"
-#include "src/core/lib/gprpp/crash.h"
-#include "test/core/util/test_config.h"
+#include "absl/log/log.h"
+#include "opentelemetry/exporters/prometheus/exporter_factory.h"
+#include "opentelemetry/exporters/prometheus/exporter_options.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/string.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/interop/client_helper.h"
 #include "test/cpp/interop/interop_client.h"
 #include "test/cpp/util/test_config.h"
@@ -116,6 +119,14 @@ ABSL_FLAG(int32_t, soak_overall_timeout_seconds, 0,
 ABSL_FLAG(int32_t, soak_min_time_ms_between_rpcs, 0,
           "The minimum time in milliseconds between consecutive RPCs in a "
           "soak test (rpc_soak or channel_soak), useful for limiting QPS");
+ABSL_FLAG(
+    int32_t, soak_request_size, 271828,
+    "The request size in a soak RPC. "
+    "The default value is set based on the interop large unary test case.");
+ABSL_FLAG(
+    int32_t, soak_response_size, 314159,
+    "The response size in a soak RPC. "
+    "The default value is set based on the interop large unary test case.");
 ABSL_FLAG(int32_t, iteration_interval, 10,
           "The interval in seconds between rpcs. This is used by "
           "long_connection test");
@@ -128,6 +139,8 @@ ABSL_FLAG(
     "grpc-status and error message to the console, in a stable format.");
 ABSL_FLAG(bool, enable_observability, false,
           "Whether to enable GCP Observability");
+ABSL_FLAG(bool, enable_otel_plugin, false,
+          "Whether to enable OpenTelemetry Plugin");
 
 using grpc::testing::CreateChannelForTestCase;
 using grpc::testing::GetServiceAccountJsonKey;
@@ -146,8 +159,8 @@ bool ParseAdditionalMetadataFlag(
   while (start_pos < flag.length()) {
     size_t colon_pos = flag.find(':', start_pos);
     if (colon_pos == std::string::npos) {
-      gpr_log(GPR_ERROR,
-              "Couldn't parse metadata flag: extra characters at end of flag");
+      LOG(ERROR)
+          << "Couldn't parse metadata flag: extra characters at end of flag";
       return false;
     }
     size_t semicolon_pos = flag.find(';', colon_pos);
@@ -161,10 +174,9 @@ bool ParseAdditionalMetadataFlag(
         "abcdefghijklmnopqrstuvwxyz"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     if (key.find_first_not_of(alphanum_and_hyphen) != std::string::npos) {
-      gpr_log(GPR_ERROR,
-              "Couldn't parse metadata flag: key contains characters other "
-              "than alphanumeric and hyphens: %s",
-              key.c_str());
+      LOG(ERROR) << "Couldn't parse metadata flag: key contains characters "
+                    "other than alphanumeric and hyphens: "
+                 << key;
       return false;
     }
 
@@ -175,8 +187,8 @@ bool ParseAdditionalMetadataFlag(
       }
     }
 
-    gpr_log(GPR_INFO, "Adding additional metadata with key %s and value %s",
-            key.c_str(), value.c_str());
+    LOG(INFO) << "Adding additional metadata with key " << key << " and value "
+              << value;
     additional_metadata->insert({key, value});
 
     if (semicolon_pos == std::string::npos) {
@@ -194,16 +206,36 @@ bool ParseAdditionalMetadataFlag(
 int main(int argc, char** argv) {
   grpc::testing::TestEnvironment env(&argc, argv);
   grpc::testing::InitTest(&argc, &argv, true);
-  gpr_log(GPR_INFO, "Testing these cases: %s",
-          absl::GetFlag(FLAGS_test_case).c_str());
+  LOG(INFO) << "Testing these cases: " << absl::GetFlag(FLAGS_test_case);
   int ret = 0;
 
   if (absl::GetFlag(FLAGS_enable_observability)) {
+    // TODO(someone): remove deprecated usage
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
     auto status = grpc::experimental::GcpObservabilityInit();
-    gpr_log(GPR_DEBUG, "GcpObservabilityInit() status_code: %d", status.code());
+    VLOG(2) << "GcpObservabilityInit() status_code: " << status.code();
     if (!status.ok()) {
       return 1;
     }
+  }
+
+  // TODO(stanleycheung): switch to CsmObservabilityBuilder once xds setup is
+  // ready
+  if (absl::GetFlag(FLAGS_enable_otel_plugin)) {
+    VLOG(2) << "Registering Prometheus exporter";
+    opentelemetry::exporter::metrics::PrometheusExporterOptions opts;
+    // default was "localhost:9464" which causes connection issue across GKE
+    // pods
+    opts.url = "0.0.0.0:9464";
+    auto prometheus_exporter =
+        opentelemetry::exporter::metrics::PrometheusExporterFactory::Create(
+            opts);
+    auto meter_provider =
+        std::make_shared<opentelemetry::sdk::metrics::MeterProvider>();
+    meter_provider->AddMetricReader(std::move(prometheus_exporter));
+    grpc::OpenTelemetryPluginBuilder otel_builder;
+    otel_builder.SetMeterProvider(std::move(meter_provider));
+    assert(otel_builder.BuildAndRegisterGlobal().ok());
   }
 
   grpc::testing::ChannelCreationFunc channel_creation_func;
@@ -319,14 +351,18 @@ int main(int argc, char** argv) {
       absl::GetFlag(FLAGS_soak_max_failures),
       absl::GetFlag(FLAGS_soak_per_iteration_max_acceptable_latency_ms),
       absl::GetFlag(FLAGS_soak_min_time_ms_between_rpcs),
-      absl::GetFlag(FLAGS_soak_overall_timeout_seconds));
+      absl::GetFlag(FLAGS_soak_overall_timeout_seconds),
+      absl::GetFlag(FLAGS_soak_request_size),
+      absl::GetFlag(FLAGS_soak_response_size));
   actions["rpc_soak"] = std::bind(
       &grpc::testing::InteropClient::DoRpcSoakTest, &client,
       absl::GetFlag(FLAGS_server_host), absl::GetFlag(FLAGS_soak_iterations),
       absl::GetFlag(FLAGS_soak_max_failures),
       absl::GetFlag(FLAGS_soak_per_iteration_max_acceptable_latency_ms),
       absl::GetFlag(FLAGS_soak_min_time_ms_between_rpcs),
-      absl::GetFlag(FLAGS_soak_overall_timeout_seconds));
+      absl::GetFlag(FLAGS_soak_overall_timeout_seconds),
+      absl::GetFlag(FLAGS_soak_request_size),
+      absl::GetFlag(FLAGS_soak_response_size));
   actions["long_lived_channel"] =
       std::bind(&grpc::testing::InteropClient::DoLongLivedChannelTest, &client,
                 absl::GetFlag(FLAGS_soak_iterations),
@@ -350,23 +386,16 @@ int main(int argc, char** argv) {
       if (!test_cases.empty()) test_cases += "\n";
       test_cases += action.first;
     }
-    gpr_log(GPR_ERROR, "Unsupported test case %s. Valid options are\n%s",
-            absl::GetFlag(FLAGS_test_case).c_str(), test_cases.c_str());
+    LOG(ERROR) << "Unsupported test case " << absl::GetFlag(FLAGS_test_case)
+               << ". Valid options are\n"
+               << test_cases;
     ret = 1;
   }
 
   if (absl::GetFlag(FLAGS_enable_observability)) {
+    // TODO(someone): remove deprecated usage
+    // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
     grpc::experimental::GcpObservabilityClose();
-    // TODO(stanleycheung): remove this once the observability exporter plugin
-    //                      is able to gracefully flush observability data to
-    //                      cloud at shutdown
-    const int observability_exporter_sleep_seconds = 65;
-    gpr_log(GPR_DEBUG, "Sleeping %ds before shutdown.",
-            observability_exporter_sleep_seconds);
-    gpr_sleep_until(
-        gpr_time_add(gpr_now(GPR_CLOCK_REALTIME),
-                     gpr_time_from_seconds(observability_exporter_sleep_seconds,
-                                           GPR_TIMESPAN)));
   }
 
   return ret;

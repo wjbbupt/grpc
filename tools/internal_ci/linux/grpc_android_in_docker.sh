@@ -23,7 +23,7 @@ REPO_ROOT="$(pwd)"
 # Build protoc and grpc_cpp_plugin. Codegen is not cross-compiled to Android
 mkdir -p cmake/build
 pushd cmake/build
-cmake -DgRPC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release ../..
+cmake -DgRPC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 ../..
 make protoc grpc_cpp_plugin -j8
 popd
 
@@ -46,14 +46,8 @@ gcloud firebase test android run \
     --type instrumentation \
     --app app/build/outputs/apk/debug/app-debug.apk \
     --test app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-    --device model=Nexus6P,version=27,locale=en,orientation=portrait \
-    --device model=Nexus6P,version=26,locale=en,orientation=portrait \
-    --device model=Nexus6P,version=25,locale=en,orientation=portrait \
-    --device model=Nexus6P,version=24,locale=en,orientation=portrait \
-    --device model=Nexus6P,version=23,locale=en,orientation=portrait \
-    --device model=Nexus6,version=22,locale=en,orientation=portrait \
-    --device model=Nexus6,version=21,locale=en,orientation=portrait \
-    --device model=walleye,version=28,locale=en,orientation=portrait
+    --device model=a10,version=29,locale=en,orientation=portrait \
+    --device model=oriole,version=32,locale=en,orientation=portrait
 
 # Build hello world example
 cd "${REPO_ROOT}/examples/android/helloworld"

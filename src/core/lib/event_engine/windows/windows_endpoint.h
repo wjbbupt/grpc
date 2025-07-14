@@ -19,24 +19,27 @@
 
 #include <grpc/event_engine/event_engine.h>
 
+#include "src/core/lib/event_engine/thread_pool/thread_pool.h"
 #include "src/core/lib/event_engine/windows/win_socket.h"
 
-namespace grpc_event_engine {
-namespace experimental {
+namespace grpc_event_engine::experimental {
 
 class WindowsEndpoint : public EventEngine::Endpoint {
  public:
   WindowsEndpoint(const EventEngine::ResolvedAddress& peer_address,
                   std::unique_ptr<WinSocket> socket,
                   MemoryAllocator&& allocator, const EndpointConfig& config,
-                  Executor* Executor, std::shared_ptr<EventEngine> engine);
+                  ThreadPool* thread_pool, std::shared_ptr<EventEngine> engine);
   ~WindowsEndpoint() override;
   bool Read(absl::AnyInvocable<void(absl::Status)> on_read, SliceBuffer* buffer,
-            const ReadArgs* args) override;
+            ReadArgs args) override;
   bool Write(absl::AnyInvocable<void(absl::Status)> on_writable,
-             SliceBuffer* data, const WriteArgs* args) override;
+             SliceBuffer* data, WriteArgs args) override;
   const EventEngine::ResolvedAddress& GetPeerAddress() const override;
   const EventEngine::ResolvedAddress& GetLocalAddress() const override;
+  std::shared_ptr<TelemetryInfo> GetTelemetryInfo() const override {
+    return nullptr;
+  }
 
  private:
   struct AsyncIOState;
@@ -47,15 +50,15 @@ class WindowsEndpoint : public EventEngine::Endpoint {
     void Run() override;
     void Prime(std::shared_ptr<AsyncIOState> io_state, SliceBuffer* buffer,
                absl::AnyInvocable<void(absl::Status)> cb);
-    // Resets the per-request data
-    void Reset();
+    // Resets the per-request data, releasing the ref on io_state_.
+    // Returns the previous callback.
+    [[nodiscard]] absl::AnyInvocable<void(absl::Status)>
+    ResetAndReturnCallback();
     // Run the callback with whatever data is available, and reset state.
     //
     // Returns true if the callback has been called with some data. Returns
     // false if no data has been read.
     bool MaybeFinishIfDataHasAlreadyBeenRead();
-    // Execute the callback and reset.
-    void ExecuteCallbackAndReset(absl::Status status);
     // Swap any leftover slices into the provided buffer
     void DonateSpareSlices(SliceBuffer* buffer);
 
@@ -72,8 +75,10 @@ class WindowsEndpoint : public EventEngine::Endpoint {
     void Run() override;
     void Prime(std::shared_ptr<AsyncIOState> io_state, SliceBuffer* buffer,
                absl::AnyInvocable<void(absl::Status)> cb);
-    // Resets the per-request data
-    void Reset();
+    // Resets the per-request data, releasing the ref on io_state_.
+    // Returns the previous callback.
+    [[nodiscard]] absl::AnyInvocable<void(absl::Status)>
+    ResetAndReturnCallback();
 
    private:
     std::shared_ptr<AsyncIOState> io_state_;
@@ -89,30 +94,30 @@ class WindowsEndpoint : public EventEngine::Endpoint {
   // events are complete.
   struct AsyncIOState {
     AsyncIOState(WindowsEndpoint* endpoint, std::unique_ptr<WinSocket> socket,
-                 std::shared_ptr<EventEngine> engine);
+                 std::shared_ptr<EventEngine> engine, ThreadPool* thread_pool);
     ~AsyncIOState();
+
+    // Perform the low-level calls and execute the HandleReadClosure
+    // asynchronously.
+    void DoTcpRead(SliceBuffer* buffer);
+
     WindowsEndpoint* const endpoint;
     std::unique_ptr<WinSocket> socket;
     HandleReadClosure handle_read_event;
     HandleWriteClosure handle_write_event;
     std::shared_ptr<EventEngine> engine;
+    ThreadPool* thread_pool;
   };
-
-  // Perform the low-level calls and execute the HandleReadClosure
-  // asynchronously.
-  absl::Status DoTcpRead(SliceBuffer* buffer);
 
   EventEngine::ResolvedAddress peer_address_;
   std::string peer_address_string_;
   EventEngine::ResolvedAddress local_address_;
   std::string local_address_string_;
   MemoryAllocator allocator_;
-  Executor* executor_;
   std::shared_ptr<AsyncIOState> io_state_;
 };
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
 #endif
 

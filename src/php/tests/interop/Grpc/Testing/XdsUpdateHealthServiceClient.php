@@ -39,7 +39,7 @@ class XdsUpdateHealthServiceClient extends \Grpc\BaseStub {
      * @param \Grpc\Testing\EmptyMessage $argument input argument
      * @param array $metadata metadata
      * @param array $options call options
-     * @return \Grpc\UnaryCall
+     * @return \Grpc\UnaryCall<\Grpc\Testing\EmptyMessage>
      */
     public function SetServing(\Grpc\Testing\EmptyMessage $argument,
       $metadata = [], $options = []) {
@@ -53,13 +53,27 @@ class XdsUpdateHealthServiceClient extends \Grpc\BaseStub {
      * @param \Grpc\Testing\EmptyMessage $argument input argument
      * @param array $metadata metadata
      * @param array $options call options
-     * @return \Grpc\UnaryCall
+     * @return \Grpc\UnaryCall<\Grpc\Testing\EmptyMessage>
      */
     public function SetNotServing(\Grpc\Testing\EmptyMessage $argument,
       $metadata = [], $options = []) {
         return $this->_simpleRequest('/grpc.testing.XdsUpdateHealthService/SetNotServing',
         $argument,
         ['\Grpc\Testing\EmptyMessage', 'decode'],
+        $metadata, $options);
+    }
+
+    /**
+     * @param \Grpc\Testing\HookRequest $argument input argument
+     * @param array $metadata metadata
+     * @param array $options call options
+     * @return \Grpc\UnaryCall<\Grpc\Testing\HookResponse>
+     */
+    public function SendHookRequest(\Grpc\Testing\HookRequest $argument,
+      $metadata = [], $options = []) {
+        return $this->_simpleRequest('/grpc.testing.XdsUpdateHealthService/SendHookRequest',
+        $argument,
+        ['\Grpc\Testing\HookResponse', 'decode'],
         $metadata, $options);
     }
 

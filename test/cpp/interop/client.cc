@@ -16,21 +16,20 @@
 //
 //
 
-#include <memory>
-#include <unordered_map>
-
-#include "absl/flags/flag.h"
-
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/support/channel_arguments.h>
 
-#include "src/core/lib/gpr/string.h"
-#include "src/core/lib/gprpp/crash.h"
-#include "test/core/util/test_config.h"
+#include <memory>
+#include <unordered_map>
+
+#include "absl/flags/flag.h"
+#include "absl/log/log.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/string.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/interop/client_helper.h"
 #include "test/cpp/interop/interop_client.h"
 #include "test/cpp/util/test_config.h"
@@ -120,6 +119,14 @@ ABSL_FLAG(int32_t, soak_min_time_ms_between_rpcs, 0,
 ABSL_FLAG(int32_t, iteration_interval, 10,
           "The interval in seconds between rpcs. This is used by "
           "long_connection test");
+ABSL_FLAG(
+    int32_t, soak_request_size, 271828,
+    "The request size in a soak RPC. "
+    "The default value is set based on the interop large unary test case.");
+ABSL_FLAG(
+    int32_t, soak_response_size, 314159,
+    "The response size in a soak RPC. "
+    "The default value is set based on the interop large unary test case.");
 ABSL_FLAG(std::string, additional_metadata, "",
           "Additional metadata to send in each request, as a "
           "semicolon-separated list of key:value pairs.");
@@ -178,8 +185,8 @@ ParseAdditionalMetadataFlag(const std::string& flag) {
       }
     }
 
-    gpr_log(GPR_INFO, "Adding additional metadata with key %s and value %s",
-            key.c_str(), value.c_str());
+    LOG(INFO) << "Adding additional metadata with key " << key << " and value "
+              << value;
     additional_metadata.insert({key, value});
 
     if (semicolon_pos == std::string::npos) {
@@ -197,16 +204,14 @@ ParseAdditionalMetadataFlag(const std::string& flag) {
 int main(int argc, char** argv) {
   grpc::testing::TestEnvironment env(&argc, argv);
   grpc::testing::InitTest(&argc, &argv, true);
-  gpr_log(GPR_INFO, "Testing these cases: %s",
-          absl::GetFlag(FLAGS_test_case).c_str());
+  LOG(INFO) << "Testing these cases: " << absl::GetFlag(FLAGS_test_case);
   int ret = 0;
 
   std::string test_case = absl::GetFlag(FLAGS_test_case);
   auto additional_metadata =
       ParseAdditionalMetadataFlag(absl::GetFlag(FLAGS_additional_metadata));
   if (!additional_metadata.ok()) {
-    gpr_log(GPR_ERROR, "%s",
-            std::string(additional_metadata.status().message()).c_str());
+    LOG(ERROR) << additional_metadata.status().message();
     return 1;
   }
   grpc::testing::ChannelCreationFunc channel_creation_func =
@@ -312,14 +317,18 @@ int main(int argc, char** argv) {
       absl::GetFlag(FLAGS_soak_max_failures),
       absl::GetFlag(FLAGS_soak_per_iteration_max_acceptable_latency_ms),
       absl::GetFlag(FLAGS_soak_min_time_ms_between_rpcs),
-      absl::GetFlag(FLAGS_soak_overall_timeout_seconds));
+      absl::GetFlag(FLAGS_soak_overall_timeout_seconds),
+      absl::GetFlag(FLAGS_soak_request_size),
+      absl::GetFlag(FLAGS_soak_response_size));
   actions["rpc_soak"] = std::bind(
       &grpc::testing::InteropClient::DoRpcSoakTest, &client,
       absl::GetFlag(FLAGS_server_host), absl::GetFlag(FLAGS_soak_iterations),
       absl::GetFlag(FLAGS_soak_max_failures),
       absl::GetFlag(FLAGS_soak_per_iteration_max_acceptable_latency_ms),
       absl::GetFlag(FLAGS_soak_min_time_ms_between_rpcs),
-      absl::GetFlag(FLAGS_soak_overall_timeout_seconds));
+      absl::GetFlag(FLAGS_soak_overall_timeout_seconds),
+      absl::GetFlag(FLAGS_soak_request_size),
+      absl::GetFlag(FLAGS_soak_response_size));
   actions["long_lived_channel"] =
       std::bind(&grpc::testing::InteropClient::DoLongLivedChannelTest, &client,
                 absl::GetFlag(FLAGS_soak_iterations),
@@ -339,8 +348,9 @@ int main(int argc, char** argv) {
       if (!test_cases.empty()) test_cases += "\n";
       test_cases += action.first;
     }
-    gpr_log(GPR_ERROR, "Unsupported test case %s. Valid options are\n%s",
-            absl::GetFlag(FLAGS_test_case).c_str(), test_cases.c_str());
+    LOG(ERROR) << "Unsupported test case " << absl::GetFlag(FLAGS_test_case)
+               << ". Valid options are\n"
+               << test_cases;
     ret = 1;
   }
 

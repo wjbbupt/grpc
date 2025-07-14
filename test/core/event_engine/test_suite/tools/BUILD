@@ -24,8 +24,10 @@ grpc_cc_binary(
     name = "windows_event_engine_echo_client",
     testonly = True,
     srcs = ["windows_event_engine_factory.cc"],
+    external_deps = ["absl/log:check"],
     tags = [
         "bazel_only",
+        "grpc:event_engine_impl",
         "no_linux",
         "no_mac",
     ],
@@ -40,8 +42,10 @@ grpc_cc_binary(
     name = "posix_event_engine_echo_client",
     testonly = True,
     srcs = ["posix_event_engine_factory.cc"],
+    external_deps = ["absl/log:check"],
     tags = [
         "bazel_only",
+        "grpc:event_engine_impl",
         "no_windows",
     ],
     deps = [
@@ -59,12 +63,13 @@ grpc_cc_library(
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
     ],
-    language = "C++",
     deps = [
         "//:gpr_platform",
         "//src/core:common_event_engine_closures",
         "//test/core/event_engine:event_engine_test_utils",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

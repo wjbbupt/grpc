@@ -14,23 +14,22 @@
 
 #include "src/core/lib/event_engine/posix_engine/timer_manager.h"
 
-#include <algorithm>
+#include <grpc/grpc.h>
+
 #include <atomic>
 #include <memory>
 #include <random>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/log/log.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
-
-#include <grpc/grpc.h>
-#include <grpc/support/log.h>
-
 #include "src/core/lib/event_engine/common_closures.h"
 #include "src/core/lib/event_engine/posix_engine/timer.h"
+#include "src/core/lib/event_engine/thread_pool/thread_pool.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_event_engine {
 namespace experimental {
@@ -46,7 +45,7 @@ TEST(TimerManagerTest, StressTest) {
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<> dis_millis(100, 3000);
-  auto pool = std::make_shared<grpc_event_engine::experimental::ThreadPool>();
+  auto pool = MakeThreadPool(8);
   {
     TimerManager manager(pool);
     for (auto& timer : timers) {
@@ -66,8 +65,8 @@ TEST(TimerManagerTest, StressTest) {
                << called.load(std::memory_order_relaxed) << "/" << kTimerCount
                << " callbacks executed";
       }
-      gpr_log(GPR_DEBUG, "Processed %d/%d callbacks",
-              called.load(std::memory_order_relaxed), kTimerCount);
+      VLOG(2) << "Processed " << called.load(std::memory_order_relaxed) << "/"
+              << kTimerCount << " callbacks";
       absl::SleepFor(absl::Milliseconds(333));
     }
   }
@@ -82,7 +81,7 @@ TEST(TimerManagerTest, ShutDownBeforeAllCallbacksAreExecuted) {
   timers.resize(kTimerCount);
   std::atomic_int called{0};
   experimental::AnyInvocableClosure closure([&called] { ++called; });
-  auto pool = std::make_shared<grpc_event_engine::experimental::ThreadPool>();
+  auto pool = MakeThreadPool(8);
   {
     TimerManager manager(pool);
     for (auto& timer : timers) {

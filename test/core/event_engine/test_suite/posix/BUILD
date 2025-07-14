@@ -23,16 +23,23 @@ grpc_cc_library(
     testonly = True,
     srcs = ["oracle_event_engine_posix.cc"],
     hdrs = ["oracle_event_engine_posix.h"],
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+    ],
     tags = [
         "cpu:10",
         "no_windows",
     ],
-    visibility = ["//test:__subpackages__"],
+    visibility = [
+        "//src/objective-c/tests:__subpackages__",
+        "//test:__subpackages__",
+    ],
     deps = [
         "//:grpc",
         "//test/core/event_engine:event_engine_test_utils",
         "//test/core/event_engine/test_suite:event_engine_test_framework",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -40,7 +47,6 @@ grpc_cc_test(
     name = "oracle_event_engine_posix_test",
     srcs = ["oracle_event_engine_posix_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     tags = [
         "no_test_ios",
         "no_windows",
@@ -56,6 +62,6 @@ grpc_cc_test(
         "//:grpc",
         "//test/core/event_engine/test_suite/tests:client",
         "//test/core/event_engine/test_suite/tests:server",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

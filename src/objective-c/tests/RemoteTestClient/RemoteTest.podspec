@@ -7,10 +7,10 @@ Pod::Spec.new do |s|
   s.summary = "RemoteTest example"
   s.source = { :git => 'https://github.com/grpc/grpc.git' }
 
-  s.ios.deployment_target = '9.0'
-  s.osx.deployment_target = '10.10'
-  s.tvos.deployment_target = '10.0'
-  s.watchos.deployment_target = '4.0'
+  s.ios.deployment_target = '15.0'
+  s.osx.deployment_target = '11.0'
+  s.tvos.deployment_target = '13.0'
+  s.watchos.deployment_target = '6.0'
 
   # Run protoc with the Objective-C and gRPC plugins to generate protocol messages and gRPC clients.
   s.dependency "!ProtoCompiler-gRPCPlugin"

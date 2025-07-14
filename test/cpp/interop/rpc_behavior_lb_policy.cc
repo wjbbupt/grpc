@@ -16,15 +16,16 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "test/cpp/interop/rpc_behavior_lb_policy.h"
 
-#include "absl/strings/str_format.h"
+#include <grpc/support/port_platform.h>
 
+#include "absl/log/check.h"
+#include "absl/strings/str_format.h"
 #include "src/core/lib/iomgr/pollset_set.h"
-#include "src/core/lib/json/json_args.h"
-#include "src/core/lib/json/json_object_loader.h"
+#include "src/core/load_balancing/delegating_helper.h"
+#include "src/core/util/json/json_args.h"
+#include "src/core/util/json/json_object_loader.h"
 
 namespace grpc {
 namespace testing {
@@ -83,8 +84,16 @@ class RpcBehaviorLbPolicy : public LoadBalancingPolicy {
   absl::string_view name() const override { return kRpcBehaviorLbPolicyName; }
 
   absl::Status UpdateLocked(UpdateArgs args) override {
-    RefCountedPtr<RpcBehaviorLbPolicyConfig> config = std::move(args.config);
+    auto config = args.config.TakeAsSubclass<RpcBehaviorLbPolicyConfig>();
     rpc_behavior_ = std::string(config->rpc_behavior());
+    // Use correct config for the delegate load balancing policy
+    auto delegate_config =
+        CoreConfiguration::Get().lb_policy_registry().ParseLoadBalancingConfig(
+            grpc_core::Json::FromArray({grpc_core::Json::FromObject(
+                {{std::string(delegate_->name()),
+                  grpc_core::Json::FromObject({})}})}));
+    CHECK_OK(delegate_config);
+    args.config = std::move(*delegate_config);
     return delegate_->UpdateLocked(std::move(args));
   }
 
@@ -101,12 +110,17 @@ class RpcBehaviorLbPolicy : public LoadBalancingPolicy {
           rpc_behavior_(rpc_behavior) {}
 
     PickResult Pick(PickArgs args) override {
-      char* rpc_behavior_copy = static_cast<char*>(
-          args.call_state->Alloc(rpc_behavior_.length() + 1));
-      strcpy(rpc_behavior_copy, rpc_behavior_.c_str());
-      args.initial_metadata->Add(kRpcBehaviorMetadataKey, rpc_behavior_copy);
       // Do pick.
-      return delegate_picker_->Pick(args);
+      auto pick_result = delegate_picker_->Pick(args);
+      // Add metadata.
+      auto* complete_pick =
+          std::get_if<PickResult::Complete>(&pick_result.result);
+      if (complete_pick != nullptr) {
+        complete_pick->metadata_mutations.Set(kRpcBehaviorMetadataKey,
+                                              rpc_behavior_);
+      }
+      // Return result.
+      return pick_result;
     }
 
    private:
@@ -114,45 +128,19 @@ class RpcBehaviorLbPolicy : public LoadBalancingPolicy {
     std::string rpc_behavior_;
   };
 
-  class Helper : public ChannelControlHelper {
+  class Helper
+      : public ParentOwningDelegatingChannelControlHelper<RpcBehaviorLbPolicy> {
    public:
     explicit Helper(RefCountedPtr<RpcBehaviorLbPolicy> parent)
-        : parent_(std::move(parent)) {}
-
-    RefCountedPtr<grpc_core::SubchannelInterface> CreateSubchannel(
-        grpc_core::ServerAddress address,
-        const grpc_core::ChannelArgs& args) override {
-      return parent_->channel_control_helper()->CreateSubchannel(
-          std::move(address), args);
-    }
+        : ParentOwningDelegatingChannelControlHelper(std::move(parent)) {}
 
     void UpdateState(grpc_connectivity_state state, const absl::Status& status,
                      RefCountedPtr<SubchannelPicker> picker) override {
-      parent_->channel_control_helper()->UpdateState(
+      parent_helper()->UpdateState(
           state, status,
           grpc_core::MakeRefCounted<Picker>(std::move(picker),
-                                            parent_->rpc_behavior_));
+                                            parent()->rpc_behavior_));
     }
-
-    void RequestReresolution() override {
-      parent_->channel_control_helper()->RequestReresolution();
-    }
-
-    absl::string_view GetAuthority() override {
-      return parent_->channel_control_helper()->GetAuthority();
-    }
-
-    grpc_event_engine::experimental::EventEngine* GetEventEngine() override {
-      return parent_->channel_control_helper()->GetEventEngine();
-    }
-
-    void AddTraceEvent(TraceSeverity severity,
-                       absl::string_view message) override {
-      parent_->channel_control_helper()->AddTraceEvent(severity, message);
-    }
-
-   private:
-    RefCountedPtr<RpcBehaviorLbPolicy> parent_;
   };
 
   void ShutdownLocked() override {
@@ -177,7 +165,7 @@ class RpcBehaviorLbPolicyFactory
 
   absl::StatusOr<RefCountedPtr<LoadBalancingPolicy::Config>>
   ParseLoadBalancingConfig(const Json& json) const override {
-    return grpc_core::LoadRefCountedFromJson<RpcBehaviorLbPolicyConfig>(
+    return grpc_core::LoadFromJson<RefCountedPtr<RpcBehaviorLbPolicyConfig>>(
         json, JsonArgs(), "errors validating LB policy config");
   }
 };

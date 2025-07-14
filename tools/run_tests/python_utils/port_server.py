@@ -17,8 +17,7 @@
 from __future__ import print_function
 
 import argparse
-import hashlib
-import os
+import errno
 import platform
 import random
 import socket
@@ -33,51 +32,63 @@ from six.moves.socketserver import ThreadingMixIn
 # increment this number whenever making a change to ensure that
 # the changes are picked up by running CI servers
 # note that all changes must be backwards compatible
-_MY_VERSION = 21
+_MY_VERSION = 22
 
-if len(sys.argv) == 2 and sys.argv[1] == 'dump_version':
+if len(sys.argv) == 2 and sys.argv[1] == "dump_version":
     print(_MY_VERSION)
     sys.exit(0)
 
-argp = argparse.ArgumentParser(description='Server for httpcli_test')
-argp.add_argument('-p', '--port', default=12345, type=int)
-argp.add_argument('-l', '--logfile', default=None, type=str)
+argp = argparse.ArgumentParser(description="Server for httpcli_test")
+argp.add_argument("-p", "--port", default=12345, type=int)
+argp.add_argument("-l", "--logfile", default=None, type=str)
 args = argp.parse_args()
 
 if args.logfile is not None:
     sys.stdin.close()
     sys.stderr.close()
     sys.stdout.close()
-    sys.stderr = open(args.logfile, 'w')
+    sys.stderr = open(args.logfile, "w")
     sys.stdout = sys.stderr
 
-print('port server running on port %d' % args.port)
+print("port server running on port %d" % args.port)
 
 pool = []
 in_use = {}
 mu = threading.Lock()
 
-# Cronet restricts the following ports to be used (see
-# https://cs.chromium.org/chromium/src/net/base/port_util.cc). When one of these
-# ports is used in a Cronet test, the test would fail (see issue #12149). These
-# ports must be excluded from pool.
-cronet_restricted_ports = [
-    1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 77, 79, 87,
-    95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 139,
-    143, 179, 389, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 556, 563,
-    587, 601, 636, 993, 995, 2049, 3659, 4045, 6000, 6665, 6666, 6667, 6668,
-    6669, 6697
-]
+
+def can_bind_ipv6():
+    """
+    Checks if the system has IPv6 support and can bind to the IPv6 loopback address.
+    """
+    if not socket.has_ipv6:
+        # If the socket library itself has no support for IPv6, then it's moot.
+        return False
+    try:
+        # Try to bind to the IPv6 loopback address on an ephemeral port
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as sock:
+            sock.bind(("::1", 0))  # 0 lets the OS pick an ephemeral port
+            return True
+    except OSError as e:
+        # EADDRNOTAVAIL: IPv6 modules/drivers are loaded but disabled.
+        # EAFNOSUPPORT: IPv6 modules/drivers are not loaded at all.
+        if e.errno in {errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT}:
+            return False
+        # Other errors might indicate a different issue, re-raise or handle as needed
+        raise
+    except Exception:
+        # Catch any other unexpected errors
+        return False
 
 
 def can_connect(port):
     # this test is only really useful on unices where SO_REUSE_PORT is available
     # so on Windows, where this test is expensive, skip it
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         return False
     s = socket.socket()
     try:
-        s.connect(('localhost', port))
+        s.connect(("localhost", port))
         return True
     except socket.error as e:
         return False
@@ -89,7 +100,7 @@ def can_bind(port, proto):
     s = socket.socket(proto, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        s.bind(('localhost', port))
+        s.bind(("localhost", port))
         return True
     except socket.error as e:
         return False
@@ -99,10 +110,7 @@ def can_bind(port, proto):
 
 def refill_pool(max_timeout, req):
     """Scan for ports not marked for being in use"""
-    chk = [
-        port for port in range(1025, 32766)
-        if port not in cronet_restricted_ports
-    ]
+    chk = [port for port in range(1025, 32766)]
     random.shuffle(chk)
     for i in chk:
         if len(pool) > 100:
@@ -113,8 +121,11 @@ def refill_pool(max_timeout, req):
                 continue
             req.log_message("kill old request %d" % i)
             del in_use[i]
-        if can_bind(i, socket.AF_INET) and can_bind(
-                i, socket.AF_INET6) and not can_connect(i):
+        if (
+            can_bind(i, socket.AF_INET)
+            and (not ipv6_available or can_bind(i, socket.AF_INET6))
+            and not can_connect(i)
+        ):
             req.log_message("found available port %d" % i)
             pool.append(i)
 
@@ -144,7 +155,6 @@ keep_running = True
 
 
 class Handler(BaseHTTPRequestHandler):
-
     def setup(self):
         # If the client is unreachable for 5 seconds, close the connection
         self.timeout = 5
@@ -153,51 +163,56 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         global keep_running
         global mu
-        if self.path == '/get':
+        if self.path == "/get":
             # allocate a new port, it will stay bound for ten minutes and until
             # it's unused
             self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header("Content-Type", "text/plain")
             self.end_headers()
             p = allocate_port(self)
-            self.log_message('allocated port %d' % p)
-            self.wfile.write(str(p).encode('ascii'))
-        elif self.path[0:6] == '/drop/':
+            self.log_message("allocated port %d" % p)
+            self.wfile.write(str(p).encode("ascii"))
+        elif self.path[0:6] == "/drop/":
             self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header("Content-Type", "text/plain")
             self.end_headers()
             p = int(self.path[6:])
             mu.acquire()
             if p in in_use:
                 del in_use[p]
                 pool.append(p)
-                k = 'known'
+                k = "known"
             else:
-                k = 'unknown'
+                k = "unknown"
             mu.release()
-            self.log_message('drop %s port %d' % (k, p))
-        elif self.path == '/version_number':
+            self.log_message("drop %s port %d" % (k, p))
+        elif self.path == "/version_number":
             # fetch a version string and the current process pid
             self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(str(_MY_VERSION).encode('ascii'))
-        elif self.path == '/dump':
+            self.wfile.write(str(_MY_VERSION).encode("ascii"))
+        elif self.path == "/dump":
             # yaml module is not installed on Macs and Windows machines by default
             # so we import it lazily (/dump action is only used for debugging)
             import yaml
+
             self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header("Content-Type", "text/plain")
             self.end_headers()
             mu.acquire()
             now = time.time()
-            out = yaml.dump({
-                'pool': pool,
-                'in_use': dict((k, now - v) for k, v in list(in_use.items()))
-            })
+            out = yaml.dump(
+                {
+                    "pool": pool,
+                    "in_use": dict(
+                        (k, now - v) for k, v in list(in_use.items())
+                    ),
+                }
+            )
             mu.release()
-            self.wfile.write(out.encode('ascii'))
-        elif self.path == '/quitquitquit':
+            self.wfile.write(out.encode("ascii"))
+        elif self.path == "/quitquitquit":
             self.send_response(200)
             self.end_headers()
             self.server.shutdown()
@@ -207,4 +222,8 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread"""
 
 
-ThreadedHTTPServer(('', args.port), Handler).serve_forever()
+ipv6_available = can_bind_ipv6()
+if not ipv6_available:
+    print("IPv6 not supported on this system")
+
+ThreadedHTTPServer(("", args.port), Handler).serve_forever()

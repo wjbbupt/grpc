@@ -42,6 +42,9 @@ grpc_cc_library(
     testonly = True,
     srcs = ["timer_test.cc"],
     hdrs = ["timer_test.h"],
+    external_deps = [
+        "absl/log:log",
+    ],
     deps = [
         "//test/core/event_engine:event_engine_test_utils",
         "//test/core/event_engine/test_suite:event_engine_test_framework",
@@ -54,9 +57,30 @@ grpc_cc_library(
     testonly = True,
     srcs = ["dns_test.cc"],
     hdrs = ["dns_test.h"],
+    data = [
+        "dns_test_record_groups.yaml",
+        "//test/cpp/naming/utils:dns_resolver",
+        "//test/cpp/naming/utils:dns_server",
+        "//test/cpp/naming/utils:health_check",
+        "//test/cpp/naming/utils:tcp_connect",
+    ],
+    external_deps = [
+        "absl/log:log",
+        "absl/status:statusor",
+        "absl/strings",
+        "absl/strings:str_format",
+        "address_sorting",
+    ],
     deps = [
+        "//:subprocess",
+        "//src/core:env",
         "//test/core/event_engine:event_engine_test_utils",
         "//test/core/event_engine/test_suite:event_engine_test_framework",
+        "//test/core/test_util:fake_udp_and_tcp_server",
+        "//test/core/test_util:grpc_test_util_base",
+        "//test/cpp/util:get_grpc_test_runfile_dir",
+        "//test/cpp/util:test_util",
+        "//test/cpp/util/windows:manifest_file",
     ],
     alwayslink = 1,
 )
@@ -66,6 +90,20 @@ grpc_cc_library(
     testonly = True,
     srcs = ["client_test.cc"],
     hdrs = ["client_test.h"],
+    external_deps = ["absl/log:check"],
+    deps = [
+        "//src/core:channel_args",
+        "//test/core/event_engine:event_engine_test_utils",
+        "//test/core/event_engine/test_suite:event_engine_test_framework",
+    ],
+    alwayslink = 1,
+)
+
+grpc_cc_library(
+    name = "endpoint",
+    testonly = True,
+    srcs = ["endpoint_test.cc"],
+    external_deps = ["absl/log:check"],
     deps = [
         "//src/core:channel_args",
         "//test/core/event_engine:event_engine_test_utils",

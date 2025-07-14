@@ -31,10 +31,10 @@ from tests_aio.unit._test_server import start_test_server
 
 
 class TestChannelReady(AioTestBase):
-
     async def setUp(self):
         address, self._port, self._socket = get_socket(
-            listen=False, sock_options=(socket.SO_REUSEADDR,))
+            listen=False, sock_options=(socket.SO_REUSEADDR,)
+        )
         self._channel = aio.insecure_channel(f"{address}:{self._port}")
         self._socket.close()
 
@@ -44,12 +44,15 @@ class TestChannelReady(AioTestBase):
     async def test_channel_ready_success(self):
         # Start `channel_ready` as another Task
         channel_ready_task = self.loop.create_task(
-            self._channel.channel_ready())
+            self._channel.channel_ready()
+        )
 
         # Wait for TRANSIENT_FAILURE
         await _common.block_until_certain_state(
-            self._channel, grpc.ChannelConnectivity.TRANSIENT_FAILURE)
+            self._channel, grpc.ChannelConnectivity.TRANSIENT_FAILURE
+        )
 
+        server = None
         try:
             # Start the server
             _, server = await start_test_server(port=self._port)
@@ -57,14 +60,19 @@ class TestChannelReady(AioTestBase):
             # The RPC should recover itself
             await channel_ready_task
         finally:
-            await server.stop(None)
+            if server:
+                await server.stop(None)
 
+    @unittest.skip(
+        "skipping due to flake: https://github.com/grpc/grpc/issues/37949"
+    )
     async def test_channel_ready_blocked(self):
         with self.assertRaises(asyncio.TimeoutError):
-            await asyncio.wait_for(self._channel.channel_ready(),
-                                   test_constants.SHORT_TIMEOUT)
+            await asyncio.wait_for(
+                self._channel.channel_ready(), test_constants.SHORT_TIMEOUT
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     unittest.main(verbosity=2)

@@ -11,7 +11,7 @@ gRPC PHP installation instructions for Google Cloud Platform is in
 
 ### Prerequisites
 
-* `php`: version 7.0 or above (PHP 5.x support is deprecated from Sep 2020).
+* `php`: version 7.1 or above (PHP 5.x support is deprecated from Sep 2020).
 * `pecl`
 * `composer`
 * `phpunit` (optional)
@@ -336,7 +336,6 @@ all possible values of the `grpc.grpc.trace` option, please check
 ```
 grpc.grpc_verbosity=debug
 grpc.grpc_trace=all,-polling,-polling_api,-pollable_refcount,-timer,-timer_check
-grpc.log_filename=/var/log/grpc.log
 ```
 
 > Make sure the log file above is writable, by doing the following:

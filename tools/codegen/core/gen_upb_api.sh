@@ -20,21 +20,18 @@ cd $(dirname $0)/../../..
 bazel=`pwd`/tools/bazel
 
 if [ $# -eq 0 ]; then
-  UPB_OUTPUT_DIR=$PWD/src/core/ext/upb-generated
-  UPBDEFS_OUTPUT_DIR=$PWD/src/core/ext/upbdefs-generated
+  UPB_OUTPUT_DIR=$PWD/src/core/ext/upb-gen
+  UPBDEFS_OUTPUT_DIR=$PWD/src/core/ext/upbdefs-gen
   rm -rf $UPB_OUTPUT_DIR
   rm -rf $UPBDEFS_OUTPUT_DIR
   mkdir -p $UPB_OUTPUT_DIR
   mkdir -p $UPBDEFS_OUTPUT_DIR
 else
-  UPB_OUTPUT_DIR=$1/upb-generated
-  UPBDEFS_OUTPUT_DIR=$1/upbdefs-generated
-  mkdir $UPB_OUTPUT_DIR
-  mkdir $UPBDEFS_OUTPUT_DIR
+  UPB_OUTPUT_DIR=$1/upb-gen
+  UPBDEFS_OUTPUT_DIR=$1/upbdefs-gen
+  mkdir -p $UPB_OUTPUT_DIR
+  mkdir -p $UPBDEFS_OUTPUT_DIR
 fi
 
 # generate upb files from bazel rules
-python3 tools/codegen/core/gen_upb_api_from_bazel_xml.py \
-  --upb_out=$UPB_OUTPUT_DIR \
-  --upbdefs_out=$UPBDEFS_OUTPUT_DIR \
-  --verbose
+tools/artifact_gen/gen_upb_api_from_bazel.sh --upb_out=$UPB_OUTPUT_DIR --upbdefs_out=$UPBDEFS_OUTPUT_DIR

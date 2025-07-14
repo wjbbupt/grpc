@@ -16,43 +16,40 @@
 //
 //
 
-#include "src/core/ext/xds/xds_lb_policy_registry.h"
-
-#include <algorithm>
-#include <string>
+#include "src/core/xds/grpc/xds_lb_policy_registry.h"
 
 #include <google/protobuf/any.pb.h>
 #include <google/protobuf/duration.pb.h>
 #include <google/protobuf/struct.pb.h>
 #include <google/protobuf/wrappers.pb.h>
+#include <grpc/grpc.h>
+
+#include <string>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/config/core/v3/extension.pb.h"
+#include "envoy/extensions/load_balancing_policies/client_side_weighted_round_robin/v3/client_side_weighted_round_robin.pb.h"
+#include "envoy/extensions/load_balancing_policies/pick_first/v3/pick_first.pb.h"
+#include "envoy/extensions/load_balancing_policies/ring_hash/v3/ring_hash.pb.h"
+#include "envoy/extensions/load_balancing_policies/round_robin/v3/round_robin.pb.h"
+#include "envoy/extensions/load_balancing_policies/wrr_locality/v3/wrr_locality.pb.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "upb/def.hpp"
-#include "upb/upb.hpp"
-
-#include <grpc/grpc.h>
-
-#include "src/core/ext/xds/xds_bootstrap_grpc.h"
-#include "src/core/lib/config/core_configuration.h"
-#include "src/core/lib/gprpp/crash.h"
-#include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/gprpp/validation_errors.h"
-#include "src/core/lib/json/json_writer.h"
-#include "src/core/lib/load_balancing/lb_policy.h"
-#include "src/core/lib/load_balancing/lb_policy_factory.h"
-#include "src/proto/grpc/testing/xds/v3/client_side_weighted_round_robin.pb.h"
-#include "src/proto/grpc/testing/xds/v3/cluster.pb.h"
-#include "src/proto/grpc/testing/xds/v3/extension.pb.h"
-#include "src/proto/grpc/testing/xds/v3/ring_hash.pb.h"
-#include "src/proto/grpc/testing/xds/v3/round_robin.pb.h"
-#include "src/proto/grpc/testing/xds/v3/typed_struct.pb.h"
-#include "src/proto/grpc/testing/xds/v3/wrr_locality.pb.h"
-#include "test/core/util/scoped_env_var.h"
-#include "test/core/util/test_config.h"
+#include "src/core/config/core_configuration.h"
+#include "src/core/load_balancing/lb_policy.h"
+#include "src/core/load_balancing/lb_policy_factory.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/json/json_writer.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/validation_errors.h"
+#include "src/core/xds/grpc/xds_bootstrap_grpc.h"
+#include "test/core/test_util/test_config.h"
+#include "upb/mem/arena.hpp"
+#include "upb/reflection/def.hpp"
+#include "xds/type/v3/typed_struct.pb.h"
 
 namespace grpc_core {
 namespace testing {
@@ -62,6 +59,7 @@ using LoadBalancingPolicyProto =
     ::envoy::config::cluster::v3::LoadBalancingPolicy;
 using ::envoy::extensions::load_balancing_policies::
     client_side_weighted_round_robin::v3::ClientSideWeightedRoundRobin;
+using ::envoy::extensions::load_balancing_policies::pick_first::v3::PickFirst;
 using ::envoy::extensions::load_balancing_policies::ring_hash::v3::RingHash;
 using ::envoy::extensions::load_balancing_policies::round_robin::v3::RoundRobin;
 using ::envoy::extensions::load_balancing_policies::wrr_locality::v3::
@@ -74,17 +72,19 @@ absl::StatusOr<std::string> ConvertXdsPolicy(
     const LoadBalancingPolicyProto& policy) {
   std::string serialized_policy = policy.SerializeAsString();
   upb::Arena arena;
-  upb::SymbolTable symtab;
-  XdsResourceType::DecodeContext context = {nullptr,
-                                            GrpcXdsBootstrap::GrpcXdsServer(),
-                                            nullptr, symtab.ptr(), arena.ptr()};
+  upb::DefPool def_pool;
+  XdsResourceType::DecodeContext context = {nullptr, GrpcXdsServer(),
+                                            def_pool.ptr(), arena.ptr()};
   auto* upb_policy = envoy_config_cluster_v3_LoadBalancingPolicy_parse(
       serialized_policy.data(), serialized_policy.size(), arena.ptr());
   ValidationErrors errors;
   ValidationErrors::ScopedField field(&errors, ".load_balancing_policy");
   auto config = XdsLbPolicyRegistry().ConvertXdsLbPolicyConfig(
       context, upb_policy, &errors);
-  if (!errors.ok()) return errors.status("validation errors");
+  if (!errors.ok()) {
+    return errors.status(absl::StatusCode::kInvalidArgument,
+                         "validation errors");
+  }
   EXPECT_EQ(config.size(), 1);
   return JsonDump(Json{config[0]});
 }
@@ -127,7 +127,6 @@ TEST(RoundRobin, Basic) {
 //
 
 TEST(ClientSideWeightedRoundRobinTest, DefaultConfig) {
-  ScopedExperimentalEnvVar env_var("GRPC_EXPERIMENTAL_XDS_WRR_LB");
   LoadBalancingPolicyProto policy;
   policy.add_policies()
       ->mutable_typed_extension_config()
@@ -135,11 +134,10 @@ TEST(ClientSideWeightedRoundRobinTest, DefaultConfig) {
       ->PackFrom(ClientSideWeightedRoundRobin());
   auto result = ConvertXdsPolicy(policy);
   ASSERT_TRUE(result.ok()) << result.status();
-  EXPECT_EQ(*result, "{\"weighted_round_robin_experimental\":{}}");
+  EXPECT_EQ(*result, "{\"weighted_round_robin\":{}}");
 }
 
 TEST(ClientSideWeightedRoundRobinTest, FieldsExplicitlySet) {
-  ScopedExperimentalEnvVar env_var("GRPC_EXPERIMENTAL_XDS_WRR_LB");
   ClientSideWeightedRoundRobin wrr;
   wrr.mutable_enable_oob_load_report()->set_value(true);
   wrr.mutable_oob_reporting_period()->set_seconds(1);
@@ -155,10 +153,10 @@ TEST(ClientSideWeightedRoundRobinTest, FieldsExplicitlySet) {
   auto result = ConvertXdsPolicy(policy);
   ASSERT_TRUE(result.ok()) << result.status();
   EXPECT_EQ(*result,
-            "{\"weighted_round_robin_experimental\":{"
+            "{\"weighted_round_robin\":{"
             "\"blackoutPeriod\":\"2.000000000s\","
             "\"enableOobLoadReport\":true,"
-            "\"errorUtilizationPenalty\":5.000000,"
+            "\"errorUtilizationPenalty\":5,"
             "\"oobReportingPeriod\":\"1.000000000s\","
             "\"weightExpirationPeriod\":\"3.000000000s\","
             "\"weightUpdatePeriod\":\"4.000000000s\""
@@ -166,7 +164,6 @@ TEST(ClientSideWeightedRoundRobinTest, FieldsExplicitlySet) {
 }
 
 TEST(ClientSideWeightedRoundRobinTest, InvalidValues) {
-  ScopedExperimentalEnvVar env_var("GRPC_EXPERIMENTAL_XDS_WRR_LB");
   ClientSideWeightedRoundRobin wrr;
   wrr.mutable_oob_reporting_period()->set_seconds(-1);
   wrr.mutable_blackout_period()->set_seconds(-2);
@@ -206,20 +203,6 @@ TEST(ClientSideWeightedRoundRobinTest, InvalidValues) {
             ".client_side_weighted_round_robin.v3.ClientSideWeightedRoundRobin]"
             ".weight_update_period.seconds "
             "error:value must be in the range [0, 315576000000]]")
-      << result.status();
-}
-
-TEST(ClientSideWeightedRoundRobinTest, EnvVarNotEnabled) {
-  LoadBalancingPolicyProto policy;
-  policy.add_policies()
-      ->mutable_typed_extension_config()
-      ->mutable_typed_config()
-      ->PackFrom(ClientSideWeightedRoundRobin());
-  auto result = ConvertXdsPolicy(policy);
-  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
-  EXPECT_EQ(result.status().message(),
-            "validation errors: [field:load_balancing_policy "
-            "error:no supported load balancing policy config found]")
       << result.status();
 }
 
@@ -457,6 +440,44 @@ TEST(WrrLocality, UnsupportedChildPolicyTypeSkipped) {
 }
 
 //
+// PickFirst
+//
+
+TEST(PickFirst, NoShuffle) {
+  LoadBalancingPolicyProto policy;
+  auto* lb_policy = policy.add_policies();
+  PickFirst pick_first;
+  pick_first.set_shuffle_address_list(false);
+  lb_policy->mutable_typed_extension_config()->mutable_typed_config()->PackFrom(
+      pick_first);
+  auto result = ConvertXdsPolicy(policy);
+  ASSERT_TRUE(result.ok()) << result.status();
+  EXPECT_EQ(*result, "{\"pick_first\":{\"shuffleAddressList\":false}}");
+}
+
+TEST(PickFirst, Shuffle) {
+  LoadBalancingPolicyProto policy;
+  auto* lb_policy = policy.add_policies();
+  PickFirst pick_first;
+  pick_first.set_shuffle_address_list(true);
+  lb_policy->mutable_typed_extension_config()->mutable_typed_config()->PackFrom(
+      pick_first);
+  auto result = ConvertXdsPolicy(policy);
+  ASSERT_TRUE(result.ok()) << result.status();
+  EXPECT_EQ(*result, "{\"pick_first\":{\"shuffleAddressList\":true}}");
+}
+
+TEST(PickFirst, ShuffleOmitted) {
+  LoadBalancingPolicyProto policy;
+  auto* lb_policy = policy.add_policies();
+  lb_policy->mutable_typed_extension_config()->mutable_typed_config()->PackFrom(
+      PickFirst());
+  auto result = ConvertXdsPolicy(policy);
+  ASSERT_TRUE(result.ok()) << result.status();
+  EXPECT_EQ(*result, "{\"pick_first\":{\"shuffleAddressList\":false}}");
+}
+
+//
 // CustomPolicy
 //
 
@@ -612,7 +633,7 @@ TEST(XdsLbPolicyRegistryTest, MaxRecursion) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   grpc::testing::TestEnvironment env(&argc, argv);
-  grpc_core::CoreConfiguration::RegisterBuilder(
+  grpc_core::CoreConfiguration::RegisterEphemeralBuilder(
       [](grpc_core::CoreConfiguration::Builder* builder) {
         builder->lb_policy_registry()->RegisterLoadBalancingPolicyFactory(
             std::make_unique<grpc_core::testing::CustomLbPolicyFactory>());

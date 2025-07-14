@@ -16,6 +16,11 @@
 //
 //
 
+#include <grpcpp/ext/gcp_observability.h>
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/health_check_service_interface.h>
+
 #include <chrono>
 #include <csignal>
 #include <iostream>
@@ -25,12 +30,8 @@
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/log/initialize.h"
 #include "absl/strings/str_format.h"
-
-#include <grpcpp/ext/gcp_observability.h>
-#include <grpcpp/ext/proto_server_reflection_plugin.h>
-#include <grpcpp/grpcpp.h>
-#include <grpcpp/health_check_service_interface.h>
 
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
@@ -93,30 +94,22 @@ void RunServer(uint16_t port) {
 
 int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
+  absl::InitializeLog();
   // Install a signal handler for an indication to shut down server and flush
   // out observability data;
   std::signal(SIGINT, signal_handler);
   // Turn on GCP Observability for the whole binary. Based on the configuration,
   // this will emit observability data (stats, tracing and logging) to GCP
   // backends. Note that this should be done before any other gRPC operation.
-  auto status = grpc::experimental::GcpObservabilityInit();
-  if (!status.ok()) {
-    std::cerr << "GcpObservabilityInit() failed: " << status.ToString()
-              << std::endl;
-    return static_cast<int>(status.code());
+  auto observability = grpc::GcpObservability::Init();
+  if (!observability.ok()) {
+    std::cerr << "GcpObservability::Init() failed: "
+              << observability.status().ToString() << std::endl;
+    return static_cast<int>(observability.status().code());
   }
   std::cout << "Initialized GCP Observability" << std::endl;
   RunServer(absl::GetFlag(FLAGS_port));
-  // Flush out any pending Observability data
-  std::cout << "Closing GCP Observability" << std::endl;
-  grpc::experimental::GcpObservabilityClose();
-  std::cout << "Sleeping for 25 seconds to make sure Observability stats and "
-               "tracing are flushed.(Another Ctrl+C will immediately exit the "
-               "program.)"
-            << std::endl;
-  // Currently, GcpObservabilityClose() only supports flushing logs. Stats and
-  // tracing get automatically flushed at a regular interval, so sleep for an
-  // interval to make sure that those are flushed too.
-  std::this_thread::sleep_for(std::chrono::seconds(25));
+  // 'observability' object going out of scope will flush observability data.
+  std::cout << "Closing and flushing GCP Observability data" << std::endl;
   return 0;
 }

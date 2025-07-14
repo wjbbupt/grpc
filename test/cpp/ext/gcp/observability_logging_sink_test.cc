@@ -21,9 +21,8 @@
 #include "gmock/gmock.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
-
-#include "src/core/lib/json/json_reader.h"
-#include "test/core/util/test_config.h"
+#include "src/core/util/json/json_reader.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace internal {
@@ -42,7 +41,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigEmpty) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_FALSE(sink.FindMatch(true, "foo", "bar").ShouldLog());
@@ -67,7 +67,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigClientWildCardEntries) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_EQ(sink.FindMatch(true, "foo", "bar"),
@@ -93,7 +94,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigBadPath) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   EXPECT_FALSE(sink.FindMatch(true, "foo", "").ShouldLog());
 }
@@ -116,7 +118,8 @@ TEST(GcpObservabilityLoggingSinkTest,
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_EQ(sink.FindMatch(true, "service", "bar"),
@@ -145,7 +148,8 @@ TEST(GcpObservabilityLoggingSinkTest,
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_EQ(sink.FindMatch(true, "foo", "bar"),
@@ -179,7 +183,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigClientMultipleEventEntries) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_EQ(sink.FindMatch(true, "foo", "bar"),
@@ -207,7 +212,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigServerWildCardEntries) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_FALSE(sink.FindMatch(true, "foo", "bar").ShouldLog());
@@ -234,7 +240,8 @@ TEST(GcpObservabilityLoggingSinkTest,
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_FALSE(sink.FindMatch(true, "service", "bar").ShouldLog());
@@ -263,7 +270,8 @@ TEST(GcpObservabilityLoggingSinkTest,
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_FALSE(sink.FindMatch(true, "foo", "bar").ShouldLog());
@@ -297,7 +305,8 @@ TEST(GcpObservabilityLoggingSinkTest, LoggingConfigServerMultipleEventEntries) {
   grpc_core::ValidationErrors errors;
   auto config = grpc_core::LoadFromJson<GcpObservabilityConfig>(
       *json, grpc_core::JsonArgs(), &errors);
-  ASSERT_TRUE(errors.ok()) << errors.status("unexpected errors");
+  ASSERT_TRUE(errors.ok()) << errors.status(absl::StatusCode::kInvalidArgument,
+                                            "unexpected errors");
   ObservabilityLoggingSink sink(config.cloud_logging.value(), "test", {});
   // client test
   EXPECT_FALSE(sink.FindMatch(true, "foo", "bar").ShouldLog());

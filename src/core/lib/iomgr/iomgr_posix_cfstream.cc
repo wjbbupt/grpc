@@ -73,7 +73,7 @@ static bool apple_iomgr_platform_is_any_background_poller_thread(void) {
 }
 
 static bool apple_iomgr_platform_add_closure_to_background_poller(
-    grpc_closure* closure, grpc_error_handle error) {
+    grpc_closure* /*closure*/, grpc_error_handle /*error*/) {
   return false;
 }
 
@@ -184,6 +184,9 @@ void grpc_set_default_iomgr_platform() {
 }
 
 bool grpc_iomgr_run_in_background() {
+  if (grpc_core::IsEventEngineCallbackCqEnabled()) {
+    return true;
+  }
   char* enable_cfstream_str = getenv(grpc_cfstream_env_var);
   bool enable_cfstream =
       enable_cfstream_str == nullptr || enable_cfstream_str[0] != '0';

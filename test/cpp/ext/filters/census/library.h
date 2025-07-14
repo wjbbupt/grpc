@@ -19,6 +19,9 @@
 #ifndef GRPC_TEST_CPP_EXT_FILTERS_CENSUS_LIBRARY_H
 #define GRPC_TEST_CPP_EXT_FILTERS_CENSUS_LIBRARY_H
 
+#include <grpc++/grpc++.h>
+#include <grpcpp/opencensus.h>
+
 #include <string>
 #include <thread>  // NOLINT
 #include <vector>
@@ -26,17 +29,14 @@
 #include "absl/strings/str_cat.h"
 #include "gtest/gtest.h"
 #include "opencensus/stats/stats.h"
+#include "opencensus/stats/testing/test_utils.h"
 #include "opencensus/trace/exporter/span_exporter.h"
-
-#include <grpc++/grpc++.h>
-#include <grpcpp/opencensus.h>
-
-#include "src/core/lib/config/core_configuration.h"
+#include "src/core/config/core_configuration.h"
 #include "src/cpp/client/client_stats_interceptor.h"
 #include "src/cpp/ext/filters/census/client_filter.h"
 #include "src/cpp/ext/filters/census/context.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/test_lb_policies.h"
+#include "test/core/test_util/test_lb_policies.h"
 #include "test/cpp/end2end/test_service_impl.h"
 
 namespace opencensus {
@@ -97,7 +97,7 @@ class ExportedTracesRecorder
   ExportedTracesRecorder() : is_recording_(false) {}
   void Export(const std::vector<::opencensus::trace::exporter::SpanData>& spans)
       override {
-    absl::MutexLock lock(&mutex_);
+    grpc_core::MutexLock lock(&mutex_);
     if (is_recording_) {
       for (auto const& span : spans) {
         recorded_spans_.push_back(span);
@@ -106,26 +106,35 @@ class ExportedTracesRecorder
   }
 
   void StartRecording() {
-    absl::MutexLock lock(&mutex_);
+    grpc_core::MutexLock lock(&mutex_);
     ASSERT_FALSE(is_recording_);
     is_recording_ = true;
   }
 
   void StopRecording() {
-    absl::MutexLock lock(&mutex_);
+    grpc_core::MutexLock lock(&mutex_);
     ASSERT_TRUE(is_recording_);
     is_recording_ = false;
   }
 
-  std::vector<::opencensus::trace::exporter::SpanData> GetAndClearSpans() {
-    absl::MutexLock lock(&mutex_);
-    return std::move(recorded_spans_);
+  std::vector<::opencensus::trace::exporter::SpanData> GetAndClearSpans(
+      size_t expected_size = 0, absl::Duration timeout = absl::Seconds(10)) {
+    auto deadline = absl::Now() + timeout;
+    mutex_.Lock();
+    do {
+      mutex_.Unlock();
+      ::opencensus::trace::exporter::SpanExporterTestPeer::ExportForTesting();
+      mutex_.Lock();
+    } while (recorded_spans_.size() < expected_size && absl::Now() < deadline);
+    auto recorded_spans = std::move(recorded_spans_);
+    mutex_.Unlock();
+    return recorded_spans;
   }
 
  private:
   // This mutex is necessary as the SpanExporter runs a loop on a separate
   // thread which periodically exports spans.
-  absl::Mutex mutex_;
+  grpc_core::Mutex mutex_;
   bool is_recording_ ABSL_GUARDED_BY(mutex_);
   std::vector<::opencensus::trace::exporter::SpanData> recorded_spans_
       ABSL_GUARDED_BY(mutex_);
@@ -137,7 +146,7 @@ class StatsPluginEnd2EndTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
     grpc_core::CoreConfiguration::Reset();
-    grpc_core::CoreConfiguration::RegisterBuilder(
+    grpc_core::CoreConfiguration::RegisterEphemeralBuilder(
         [](grpc_core::CoreConfiguration::Builder* builder) {
           grpc_core::RegisterQueueOnceLoadBalancingPolicy(builder);
         });
@@ -175,8 +184,9 @@ class StatsPluginEnd2EndTest : public ::testing::Test {
     stub_ = EchoTestService::NewStub(grpc::CreateChannel(
         server_address_, grpc::InsecureChannelCredentials()));
 
-    // Clear out any previous spans
+    // Clear out any previous spans and metrics
     ::opencensus::trace::exporter::SpanExporterTestPeer::ExportForTesting();
+    ::opencensus::stats::testing::TestUtils::Flush();
   }
 
   void ResetStub(std::shared_ptr<Channel> channel) {

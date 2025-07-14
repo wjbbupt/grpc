@@ -19,8 +19,12 @@ from typing import Tuple, Union
 _REQUIRED_SYMBOLS = ("_protos", "_services", "_protos_and_services")
 _MINIMUM_VERSION = (3, 5, 0)
 
-_UNINSTALLED_TEMPLATE = "Install the grpcio-tools package (1.32.0+) to use the {} function."
-_VERSION_ERROR_TEMPLATE = "The {} function is only on available on Python 3.X interpreters."
+_UNINSTALLED_TEMPLATE = (
+    "Install the grpcio-tools package (1.32.0+) to use the {} function."
+)
+_VERSION_ERROR_TEMPLATE = (
+    "The {} function is only on available on Python 3.X interpreters."
+)
 
 
 def _has_runtime_proto_symbols(mod: types.ModuleType) -> bool:
@@ -30,6 +34,7 @@ def _has_runtime_proto_symbols(mod: types.ModuleType) -> bool:
 def _is_grpc_tools_importable() -> bool:
     try:
         import grpc_tools  # pylint: disable=unused-import # pytype: disable=import-error
+
         return True
     except ImportError as e:
         # NOTE: It's possible that we're encountering a transitive ImportError, so
@@ -57,8 +62,9 @@ def _call_with_lazy_import(
         if not _is_grpc_tools_importable():
             raise NotImplementedError(_UNINSTALLED_TEMPLATE.format(fn_name))
         import grpc_tools.protoc  # pytype: disable=import-error
+
         if _has_runtime_proto_symbols(grpc_tools.protoc):
-            fn = getattr(grpc_tools.protoc, '_' + fn_name)
+            fn = getattr(grpc_tools.protoc, "_" + fn_name)
             return fn(protobuf_path)
         else:
             raise NotImplementedError(_UNINSTALLED_TEMPLATE.format(fn_name))
@@ -82,7 +88,7 @@ def protos(protobuf_path):  # pylint: disable=unused-argument
 
     The returned module object corresponds to the _pb2.py file generated
     by protoc. The path is expected to be relative to an entry on sys.path
-    and all transitive dependencies of the file should also be resolveable
+    and all transitive dependencies of the file should also be resolvable
     from an entry on sys.path.
 
     To completely disable the machinery behind this function, set the
@@ -90,7 +96,7 @@ def protos(protobuf_path):  # pylint: disable=unused-argument
 
     Args:
       protobuf_path: The path to the .proto file on the filesystem. This path
-        must be resolveable from an entry on sys.path and so must all of its
+        must be resolvable from an entry on sys.path and so must all of its
         transitive dependencies.
 
     Returns:
@@ -119,7 +125,7 @@ def services(protobuf_path):  # pylint: disable=unused-argument
 
     The returned module object corresponds to the _pb2_grpc.py file generated
     by protoc. The path is expected to be relative to an entry on sys.path
-    and all transitive dependencies of the file should also be resolveable
+    and all transitive dependencies of the file should also be resolvable
     from an entry on sys.path.
 
     To completely disable the machinery behind this function, set the
@@ -127,7 +133,7 @@ def services(protobuf_path):  # pylint: disable=unused-argument
 
     Args:
       protobuf_path: The path to the .proto file on the filesystem. This path
-        must be resolveable from an entry on sys.path and so must all of its
+        must be resolvable from an entry on sys.path and so must all of its
         transitive dependencies.
 
     Returns:
@@ -150,7 +156,7 @@ def protos_and_services(protobuf_path):  # pylint: disable=unused-argument
 
     Args:
       protobuf_path: The path to the .proto file on the filesystem. This path
-        must be resolveable from an entry on sys.path and so must all of its
+        must be resolvable from an entry on sys.path and so must all of its
         transitive dependencies.
 
     Returns:

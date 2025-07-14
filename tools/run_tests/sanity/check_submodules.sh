@@ -23,25 +23,36 @@ cd "$(dirname "$0")/../../.."
 submodules=$(mktemp /tmp/submXXXXXX)
 want_submodules=$(mktemp /tmp/submXXXXXX)
 
-git submodule | awk '{ print $2 " " $1 }' | sort >"$submodules"
+git submodule | sed 's/+//g' | awk '{ print $2 " " $1 }' | sort >"$submodules"
 cat <<EOF | sort >"$want_submodules"
-third_party/abseil-cpp b971ac5250ea8de900eae9f95e06548d14cd95fe
-third_party/benchmark 361e8d1cfe0c6c36d30b39f1b61302ece5507320
+third_party/abseil-cpp 76bb24329e8bf5f39704eb10d21b9a80befa7c81
+third_party/benchmark 12235e24652fc7f809373e7c11a5f73c5763fc4c
 third_party/bloaty 60209eb1ccc34d5deefb002d1b7f37545204f7f2
-third_party/boringssl-with-bazel 8872d958b7b07173bf29b8f3b8bf36a1ca8c94a3
-third_party/cares/cares 6654436a307a5a686b008c1d4c93b0085da6e6d8
-third_party/envoy-api 084aa4a0186786570496c3a4001b72c3ef592f7f
-third_party/googleapis 2f9af297c84c55c8b871ba4495e01ade42476c92
-third_party/googletest 0e402173c97aea7a00749e825b194bfede4f2e45
-third_party/libuv 02a9e1be252b623ee032a3137c0b0c94afbe6809
+third_party/boringssl-with-bazel c63fadbde60a2224c22189d14c4001bbd2a3a629
+third_party/cares/cares 6360e96b5cf8e5980c887ce58ef727e53d77243a
+third_party/envoy-api 4de3c74cf21a9958c1cf26d8993c55c6e0d28b49
+third_party/googleapis fe8ba054ad4f7eca946c2d14a63c3f07c0b586a0
+third_party/googletest 52eb8108c5bdec04579160ae17225d66034bd723
 third_party/opencensus-proto 4aa53e15cbf1a47bc9087e6cfdca214c1eea4e89
 third_party/opentelemetry 60fa8754d890b5c55949a8c68dcfd7ab5c2395df
-third_party/protobuf f0dc78d7e6e331b8c6bb2d5283e06aa26883ca7c
+third_party/opentelemetry-cpp ced79860f8c8a091a2eabfee6d47783f828a9b59
+third_party/protobuf 74211c0dfc2777318ab53c2cd2c317a2ef9012de
+third_party/protoc-gen-validate 7b06248484ceeaa947e93ca2747eccf336a88ecc
 third_party/re2 0c5616df9c0aaa44c9440d87422012423d91c7d1
-third_party/xds 32f1caf87195bf3390061c29f18987e51ca56a88
-third_party/zlib 04f42ceca40f73e2978b50e93806c2a18c1281fc
+third_party/xds 3a472e524827f72d1ad621c4983dd5af54c46776
+third_party/zlib f1f503da85d52e56aae11557b4d79a42bcaa2b86
 EOF
 
-diff -u "$submodules" "$want_submodules"
+if ! diff -u "$submodules" "$want_submodules"; then
+  if [ "$1" = "--fix" ]; then
+    while read -r path commit; do
+      git submodule update --init "$path"
+      (cd "$path" && git checkout "$commit")
+    done <"$want_submodules"
+    exit 0
+  fi
+  echo "Submodules are out of sync. Please update this script or run with --fix."
+  exit 1
+fi
 
 rm "$submodules" "$want_submodules"
